@@ -1,0 +1,112 @@
+name: ECS Terraform CI/CD
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+  TF_WORKING_DIR: django-app          # folder where your .tf files live
+  ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }} # e.g. django-media-analytics-repo
+  ECS_CLUSTER_NAME: ${{ secrets.ECS_CLUSTER_NAME }}
+  ECS_SERVICE_NAME: ${{ secrets.ECS_SERVICE_NAME }}
+  CONTAINER_NAME: ${{ secrets.CONTAINER_NAME }} # must match var.container_name in TF
+
+jobs:
+  terraform-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+            role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/arn:aws:iam::008984192600:role/GitHub_OIDC_Role_TO_Assume
+            aws-region: ${{ env.AWS_REGION }}
+
+      # ---------- Terraform ----------
+    #   - name: Setup Terraform
+    #     uses: hashicorp/setup-terraform@v3
+    #     with:
+    #       terraform_version: 1.9.5
+
+    #   - name: Terraform Init
+    #     working-directory: ${{ env.TF_WORKING_DIR }}
+    #     run: terraform init -input=false
+
+    #   - name: Terraform Plan
+    #     working-directory: ${{ env.TF_WORKING_DIR }}
+    #     run: terraform plan -input=false
+
+    #   - name: Terraform Apply
+    #     if: github.ref == 'refs/heads/main'
+    #     working-directory: ${{ env.TF_WORKING_DIR }}
+    #     run: terraform apply -auto-approve -input=false
+
+      # ---------- Build & Push Image ----------
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push Docker image
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG
+          echo "image_uri=$ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      # ---------- Update ECS Service ----------
+      - name: Register new task definition revision
+        id: register-task-def
+        run: |
+          # Get current task definition ARN
+          CURRENT_TD_ARN=$(aws ecs describe-services \
+            --cluster "${{ env.ECS_CLUSTER_NAME }}" \
+            --services "${{ env.ECS_SERVICE_NAME }}" \
+            --query "services[0].taskDefinition" \
+            --output text)
+
+          # Get current task definition JSON
+          aws ecs describe-task-definition \
+            --task-definition "$CURRENT_TD_ARN" \
+            --query "taskDefinition" \
+            --output json > td.json
+
+          # Strip fields that cannot be sent to register-task-definition
+          cat td.json \
+            | jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
+            > td-stripped.json
+
+          # Update container image
+          NEW_IMAGE="${{ steps.build-image.outputs.image_uri }}"
+          jq --arg IMAGE "$NEW_IMAGE" \
+            --arg NAME "${{ env.CONTAINER_NAME }}" \
+            '.containerDefinitions |= map(if .name == $NAME then .image = $IMAGE else . end)' \
+            td-stripped.json > td-updated.json
+
+          # Register new revision
+          NEW_TD_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://td-updated.json \
+            --query "taskDefinition.taskDefinitionArn" \
+            --output text)
+
+          echo "new_td_arn=$NEW_TD_ARN" >> $GITHUB_OUTPUT
+
+      - name: Update ECS service
+        run: |
+          aws ecs update-service \
+            --cluster "${{ env.ECS_CLUSTER_NAME }}" \
+            --service "${{ env.ECS_SERVICE_NAME }}" \
+            --task-definition "${{ steps.register-task-def.outputs.new_td_arn }}" \
+            --force-new-deployment
+
+          aws ecs wait services-stable \
+            --cluster "${{ env.ECS_CLUSTER_NAME }}" \
+            --services "${{ env.ECS_SERVICE_NAME }}"
