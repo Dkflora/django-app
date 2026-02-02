@@ -1,16 +1,21 @@
-FROM node:20-alpine
+ FROM node:20-alpine
 
-WORKDIR /app
+# WORKDIR /app
 
-# Install dependencies
-COPY package*.json ./
-RUN npm ci
+# # Install dependencies
+# COPY package*.json ./
+# RUN npm ci
 
-# Copy app source
-COPY . .
+# # Copy app source
+# COPY . .
 
-# App runtime port (see section 3)
-EXPOSE 3000
+# # App runtime port (see section 3)
+# EXPOSE 3000
 
-# Start the app
-CMD ["npm", "start"]
+# # Start the app
+# CMD ["npm", "start"]
+
+RUN node -v && npm -v
+RUN ls -la
+RUN npm ci --verbose
+
