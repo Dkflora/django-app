@@ -7,7 +7,7 @@ on:
 
 env:
   AWS_REGION: ${{ secrets.AWS_REGION }}
-  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+  ROLE_TO_ASSUME: ${{ secrets.ROLE_TO_ASSUME }}
   TF_WORKING_DIR: django-app          # folder where your .tf files live
   ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }} # e.g. django-media-analytics-repo
   ECS_CLUSTER_NAME: ${{ secrets.ECS_CLUSTER_NAME }}
@@ -25,7 +25,7 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-            role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/arn:aws:iam::008984192600:role/GitHub_OIDC_Role_TO_Assume
+            role-to-assume: arn:aws:iam::${{ secrets.ROLE_TO_ASSUME }} :role/${{ secrets.ROLE_NAME }}
             aws-region: ${{ env.AWS_REGION }}
 
       # ---------- Terraform ----------
