@@ -5,14 +5,18 @@ on:
     branches:
       - main
 
+permissions:
+  id-token: write
+  contents: read
+
 env:
   AWS_REGION: ${{ secrets.AWS_REGION }}
   ROLE_TO_ASSUME: ${{ secrets.ROLE_TO_ASSUME }}
-  TF_WORKING_DIR: django-app          # folder where your .tf files live
-  ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }} # e.g. django-media-analytics-repo
+  TF_WORKING_DIR: django-app
+  ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
   ECS_CLUSTER_NAME: ${{ secrets.ECS_CLUSTER_NAME }}
   ECS_SERVICE_NAME: ${{ secrets.ECS_SERVICE_NAME }}
-  CONTAINER_NAME: ${{ secrets.CONTAINER_NAME }} # must match var.container_name in TF
+  CONTAINER_NAME: ${{ secrets.CONTAINER_NAME }}
 
 jobs:
   terraform-and-deploy:
@@ -25,8 +29,12 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-            role-to-assume: arn:aws:iam::${{ secrets.ROLE_TO_ASSUME }} :role/${{ secrets.ROLE_NAME }}
-            aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify identity
+        run: aws sts get-caller-identity
+
 
       # ---------- Terraform ----------
     #   - name: Setup Terraform
